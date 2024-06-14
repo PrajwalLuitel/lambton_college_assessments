@@ -1,90 +1,118 @@
+from typing import Any
 import tmdbsimple as tmdb
 import yfinance as yf
 import pandas as pd
 import datetime
-import matplotlib.pyplot as plt
-import seaborn as sns
+import plotly.express as px
+import plotly.graph_objects as go
 from textblob import TextBlob
-
-
 
 from my_secrets import TMDB_API_KEY
 
-# Set up the TMDb API key
+# The API key to fetch data from the TMDB
 tmdb.API_KEY = TMDB_API_KEY
 
-# Function to get movie details from TMDb
-def get_movie_details(company_id, num_movies=10):
-    company = tmdb.Companies(company_id)
-    movies = company.movies()['results'][:num_movies]
-    movie_details = []
-    for movie in movies:
-        movie_info = tmdb.Movies(movie['id']).info()
-        movie_details.append({
-            'title': movie_info['title'],
-            'release_date': movie_info['release_date'],
-            'description': movie_info['overview']
-        })
-    return pd.DataFrame(movie_details)
 
-# Example: Collecting movie details for Walt Disney Pictures (company ID: 2)
-movie_data = get_movie_details(company_id=2)
+# Class with all the methods regarding the movie data and TMDB api
+class MovieData:
+    def __call__(self, company_id, num_movies=10) -> Any:
+        company = tmdb.Companies(company_id)
+        movies = company.movies()['results'][:num_movies]
+        movie_details = []
+        for movie in movies:
+            movie_info = tmdb.Movies(movie['id']).info()
+            reviews = tmdb.Movies(movie['id']).reviews()
+            review_texts = [review['content'] for review in reviews['results']]
+            movie_details.append({
+                'title': movie_info['title'],
+                'release_date': movie_info['release_date'],
+                'description': movie_info['overview'],
+                'reviews': ' '.join(review_texts)  # Combine all reviews into a single string
+            })
+        return pd.DataFrame(movie_details)
+
+# Class with all the methods with relation to the stock market data
+class StockData:
+    def __call__(self,movie_data, ticker, days_before=15, days_after=15) -> Any:
+        stock_data_list = []
+        for release_date in movie_data['release_date']:
+            release_date_dt = datetime.datetime.strptime(release_date, '%Y-%m-%d')
+            start_date = (release_date_dt - datetime.timedelta(days=days_before)).strftime('%Y-%m-%d')
+            end_date = (release_date_dt + datetime.timedelta(days=days_after)).strftime('%Y-%m-%d')
+            stock_data = self.get_stock_data(ticker, start_date, end_date)
+            stock_data['release_date'] = release_date_dt
+            stock_data_list.append(stock_data)
+        return stock_data_list
+
+    def get_stock_data(self, ticker, start_date, end_date):
+        stock_data = yf.download(ticker, start=start_date, end=end_date)
+        return stock_data
+
+# Class method for performing sentiment analysis
+class SentimentAnalysis:
+    def reviews_sentiment(self, movie_data_sentiment:pd.DataFrame) -> Any:
+        return movie_data_sentiment['reviews'].apply(self.analyze_sentiment)
+
+    def description_sentiment(self, movie_data_sentiment:pd.DataFrame) -> Any:
+        return movie_data_sentiment['description'].apply(self.analyze_sentiment)
+
+    def analyze_sentiment(self, text):
+        blob = TextBlob(text)
+        return blob.sentiment.polarity
 
 
-print(movie_data)
+# Class for visualization of the findings
+class Visualization:
+    def stock_plots(self,movie_data, stock_data_list) -> None:
+        for i, release_date in enumerate(movie_data['release_date']):
+            stock_data = stock_data_list[i]
+            release_date_dt = datetime.datetime.strptime(release_date, '%Y-%m-%d')
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'], mode='lines+markers', name='Closing Price'))
+            
+            # Add vertical line for the release date
+            fig.add_vline(x=release_date_dt, line=dict(color='red', dash='dash'))
+            
+            # Adding annotation for the release date
+            fig.add_annotation(x=release_date_dt, y=stock_data['Close'].max(), text='Release Date', showarrow=True, arrowhead=2)
+
+            fig.update_layout(
+                title=f"Stock Prices Around Release Date of '{movie_data['title'][i]}'",
+                xaxis_title='Date',
+                yaxis_title='Stock Closing Price',
+                template='plotly_dark'
+            )
+            fig.show()
+
+    def sentiment_plot(self, movie_data, sentiment_on) -> None:
+        fig = px.bar(movie_data[['title',f'sentiment_{sentiment_on}']], x='title', y=f'sentiment_{sentiment_on}', title=f'Sentiment for Each Movie Title on {sentiment_on}', labels={'sentiment': 'Sentiment Score', 'title': 'Movie Title'})
+        fig.update_layout(xaxis_title='Movie Title', yaxis_title='Sentiment Score', template='plotly_dark')
+        fig.show()
 
 
-# Function to get stock data from Yahoo Finance
-def get_stock_data(ticker, start_date, end_date):
-    stock_data = yf.download(ticker, start=start_date, end=end_date)
-    return stock_data
 
-# Example: Collecting stock data for Disney (ticker: DIS)
-# Collect stock data for 5 days before and 5 days after each movie release date
-def get_stock_data_around_release_dates(movie_data, ticker, days_before=15, days_after=15):
-    stock_data_list = []
-    for release_date in movie_data['release_date']:
-        release_date = datetime.datetime.strptime(release_date, '%Y-%m-%d')
-        start_date = (release_date - datetime.timedelta(days=days_before)).strftime('%Y-%m-%d')
-        end_date = (release_date + datetime.timedelta(days=days_after)).strftime('%Y-%m-%d')
-        stock_data = get_stock_data(ticker, start_date, end_date)
-        stock_data['release_date'] = release_date.strftime('%Y-%m-%d')
-        stock_data_list.append(stock_data)
-    return pd.concat(stock_data_list)
+if __name__ == '__main__':
+    # Firstly, fetching the movie data for 10 movies of Walt Disney Pictures
+    movie_data = MovieData()(company_id=2)
 
-# Example: Getting stock data around movie release dates
-stock_data = get_stock_data_around_release_dates(movie_data, ticker='DIS')
+    # Getting the stock prices for the time around the movie release (15 days before and after the release)
+    stock_data_list = StockData()(movie_data, ticker='DIS') # DIS stands for Disney in the stock market
 
-# Merge movie data and stock data
-def merge_movie_and_stock_data(movie_data, stock_data):
-    movie_data['release_date'] = pd.to_datetime(movie_data['release_date'])
-    stock_data['release_date'] = pd.to_datetime(stock_data['release_date'])
-    merged_data = pd.merge_asof(stock_data.sort_index(), movie_data, left_on='Date', right_on='release_date', direction='backward')
-    return merged_data
+    # Analyzing the sentiment on movie reviews
+    movie_data['sentiment_reviews'] = SentimentAnalysis().reviews_sentiment(movie_data)
 
-# Example: Merging data
-merged_data = merge_movie_and_stock_data(movie_data, stock_data)
 
-# Sentiment Analysis
-def analyze_sentiment(text):
-    blob = TextBlob(text)
-    return blob.sentiment.polarity
+    # Analyzing the sentiment on movie description
+    movie_data['sentiment_description'] = SentimentAnalysis().description_sentiment(movie_data)
 
-# Example: Sentiment analysis on movie descriptions
-movie_data['sentiment'] = movie_data['description'].apply(analyze_sentiment)
+    # Visualization
+    # Visualizing the sentiments
+    visualizer = Visualization()
+    # Sentiments for reviews
+    visualizer.sentiment_plot(movie_data, "reviews")
 
-# Data Visualization
-def plot_stock_prices_around_release(merged_data):
-    plt.figure(figsize=(14, 7))
-    for release_date in merged_data['release_date'].unique():
-        subset = merged_data[merged_data['release_date'] == release_date]
-        plt.plot(subset.index, subset['Close'], marker='o', label=release_date)
-    plt.axvline(x=0, color='red', linestyle='--', label='Release Date')
-    plt.xlabel('Days Around Release')
-    plt.ylabel('Stock Closing Price')
-    plt.title('Stock Prices Around Movie Release Dates')
-    plt.legend()
-    plt.show()
+    # sentiments for description
+    visualizer.sentiment_plot(movie_data,"description")
 
-# Example: Plotting stock prices
-plot_stock_prices_around_release(merged_data)
+    # Visualization the graphs of stock prices and release dates for each movie
+    visualizer.stock_plots(movie_data, stock_data_list)

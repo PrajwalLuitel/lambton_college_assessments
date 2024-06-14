@@ -10,4 +10,4 @@ test
 **.zip
 **.rar
 
-secrets.py
+my_secrets.py

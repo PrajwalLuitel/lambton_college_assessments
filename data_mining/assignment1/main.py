@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from textblob import TextBlob
 
+# Internal Import
 from my_secrets import TMDB_API_KEY
 
 # The API key to fetch data from the TMDB

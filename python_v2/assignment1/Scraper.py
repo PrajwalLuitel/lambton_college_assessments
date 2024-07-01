@@ -82,24 +82,17 @@ class Scraper:
     def __call__(self) -> Any:
         properties = []
         for page in range(1,1900):
-            # URL of the Kijiji real estate listings for Greater Toronto Area
             url = f'https://www.kijiji.ca/b-real-estate/gta-greater-toronto-area+/page-{page}/c34l1700272'
-
-            # Send a request to fetch the HTML content
             response = requests.get(url)
             soup = BeautifulSoup(response.content, 'html.parser')
                     
             property_listings = soup.find_all('section', {'data-testid': 'listing-card'})
 
-            # Loop through each property card and extract details
             for property_card in property_listings:
                 property_details = self.get_property_detail(property_card)
                 properties.append(property_details)
 
-        # Convert to a DataFrame
         df = pd.DataFrame(properties)
-
-        # Save to a CSV file
         df.to_csv('kijiji_real_estate_gta.csv', index=False)
 
 

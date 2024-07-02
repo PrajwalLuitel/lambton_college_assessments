@@ -2,9 +2,13 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-
+import sqlite3
 
 class Scraper:
+
+
+    def __init__(self):
+        self.conn=sqlite3.connect("./example.db")
 
     def get_description(self,link):
         try:

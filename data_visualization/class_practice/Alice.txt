@@ -1,0 +1,8 @@
+with open('.txt', 'r') as file:
+	content = file.read()
+	
+	
+first_2k_words =	content[:2000]
+first_2k_text	= ' '.join(first_2k_words)
+
+= WordCloud(stopwords = stopwords_set).generate(first_2k_text)
